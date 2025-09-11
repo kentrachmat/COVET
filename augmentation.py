@@ -222,10 +222,12 @@ def flatten_lexical(orig_id: str, orig_q: str, ctx: str, parsed: Dict[str, Any])
         })
     return rows, {"alternatives": alts}
 
+
+
+
 # -----------------------
 # Main
 # -----------------------
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="/export/home/cache/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct-offline")
@@ -245,7 +247,6 @@ def main():
     # Outputs
     parser.add_argument("--out_jsonl", default="augmented_squadv2.jsonl")
     parser.add_argument("--out_csv", default="augmented_squadv2.csv")
-    parser.add_argument("--out_raw_jsonl", default="raw_prompt_outputs.jsonl")  # per-example prompt raw JSON
 
     args = parser.parse_args()
 
@@ -288,8 +289,7 @@ def main():
         "aug_id","orig_id","type","alt_index","question","answer","structure_type","orig_question","context"
     ]
     with open(args.out_jsonl, "w", encoding="utf-8") as f_jsonl, \
-         open(args.out_csv, "w", encoding="utf-8", newline="") as f_csv, \
-         open(args.out_raw_jsonl, "w", encoding="utf-8") as f_raw:
+         open(args.out_csv, "w", encoding="utf-8", newline="") as f_csv:
 
         csv_writer = csv.DictWriter(f_csv, fieldnames=csv_fieldnames)
         csv_writer.writeheader()
@@ -326,14 +326,6 @@ def main():
 
             # Parse & write
             for (orig_id, orig_q, ctx), sem_txt, syn_txt, lex_txt in zip(meta, decoded_sem, decoded_syn, decoded_lex):
-                raw_record = {
-                    "orig_id": orig_id,
-                    "semantic_raw": sem_txt,
-                    "syntactic_raw": syn_txt,
-                    "lexical_raw": lex_txt,
-                }
-                f_raw.write(json.dumps(raw_record, ensure_ascii=False) + "\n")
-
                 # SEMANTIC
                 try:
                     sem_parsed = extract_first_json(sem_txt)
@@ -341,8 +333,7 @@ def main():
                     for r in rows:
                         f_jsonl.write(json.dumps(r, ensure_ascii=False) + "\n")
                         csv_writer.writerow({k: r.get(k, "") for k in csv_fieldnames})
-                except Exception as e:
-                    # still log a stub row if parsing fails (traceable)
+                except Exception:
                     stub_id = f"{orig_id}::SEM::ERR"
                     err_row = {
                         "aug_id": stub_id, "orig_id": orig_id, "type": "SEMANTIC",
@@ -359,7 +350,7 @@ def main():
                     for r in rows:
                         f_jsonl.write(json.dumps(r, ensure_ascii=False) + "\n")
                         csv_writer.writerow({k: r.get(k, "") for k in csv_fieldnames})
-                except Exception as e:
+                except Exception:
                     stub_id = f"{orig_id}::SYN::ERR"
                     err_row = {
                         "aug_id": stub_id, "orig_id": orig_id, "type": "SYNTACTIC",
@@ -376,7 +367,7 @@ def main():
                     for r in rows:
                         f_jsonl.write(json.dumps(r, ensure_ascii=False) + "\n")
                         csv_writer.writerow({k: r.get(k, "") for k in csv_fieldnames})
-                except Exception as e:
+                except Exception:
                     stub_id = f"{orig_id}::LEX::ERR"
                     err_row = {
                         "aug_id": stub_id, "orig_id": orig_id, "type": "LEXICAL",
@@ -393,7 +384,6 @@ def main():
     print("✅ Augmentation finished.")
     print(f"JSONL: {os.path.abspath(args.out_jsonl)}")
     print(f"CSV:   {os.path.abspath(args.out_csv)}")
-    print(f"RAW:   {os.path.abspath(args.out_raw_jsonl)}")
 
 
 if __name__ == "__main__":
