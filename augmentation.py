@@ -232,7 +232,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="/export/home/cache/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct-offline")
     parser.add_argument("--split", default="train")   
-    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--max_input_tokens", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=0.6)
