@@ -15,7 +15,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "1")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 from vllm import LLM, SamplingParams
 

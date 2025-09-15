@@ -1,1 +1,4 @@
 embeddings/*.npy
+
+*.csv
+*.jsonl
