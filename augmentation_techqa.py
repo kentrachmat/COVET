@@ -240,7 +240,7 @@ def main():
     parser.add_argument("--split", default="train")   
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--max_new_tokens", type=int, default=512)
-    parser.add_argument("--max_input_tokens", type=int, default=4096)
+    parser.add_argument("--max_input_tokens", type=int, default=60000)
     parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--top_p", type=float, default=0.9)
     parser.add_argument("--seed", type=int, default=42)
@@ -365,7 +365,7 @@ def main():
         model=args.model,
         trust_remote_code=True,
         dtype="float16",
-        gpu_memory_utilization=0.75,
+        gpu_memory_utilization=0.85,
         max_model_len=args.max_input_tokens,
         tensor_parallel_size=1,
     )
