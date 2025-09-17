@@ -12,10 +12,10 @@ from sklearn.model_selection import train_test_split
 
 from datasets import DatasetDict, Dataset
 import pandas as pd
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"   
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"   
 
 from vllm import LLM, SamplingParams
 
@@ -95,12 +95,64 @@ def vllm_generate(llm, prompts, max_new_tokens, temperature, top_p, seed):
         seed=seed,
     )
     outputs = llm.generate(prompts, sp)
+    print([o.outputs[0].text.lstrip() if o.outputs else "" for o in outputs])
     return [o.outputs[0].text.lstrip() if o.outputs else "" for o in outputs]
+ 
+def hf_generate(
+    model,
+    tokenizer,
+    prompts,           
+    max_new_tokens,
+    temperature,
+    top_p,
+    seed,
+    stop
+):
+    if seed is not None:
+        torch.manual_seed(int(seed))
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(int(seed))
+
+    # Make sure we have a PAD id (silences warnings)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        model.config.pad_token_id = tokenizer.pad_token_id
+
+    enc = tokenizer(prompts, return_tensors="pt", padding=True, truncation=False)
+    enc = {k: v.to(model.device) for k, v in enc.items()}
+    input_lengths = enc["attention_mask"].sum(dim=1).tolist()
+
+    do_sample = temperature is not None and float(temperature) > 0.0
+    out = model.generate(
+        **enc,
+        max_new_tokens=int(max_new_tokens),
+        do_sample=do_sample,
+        temperature=float(temperature) if do_sample else None,
+        top_p=float(top_p) if do_sample else None,
+        eos_token_id=tokenizer.eos_token_id,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+    
+    texts = []
+    for i, seq in enumerate(out):
+        gen_tokens = seq[input_lengths[i]:]                 
+        text = tokenizer.decode(gen_tokens, skip_special_tokens=True).lstrip()
+        print("XX"*20)
+        
+        print(text)
+        print("XX"*20)
+        if stop:
+            cut = min([text.find(s) for s in stop if s in text] + [len(text)])
+            text = text[:cut]
+        texts.append(text)
+
+    return texts
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="/export/home/cache/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct-offline")
     parser.add_argument("--split", default="validation")
+    parser.add_argument("--vllm", default="0")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--max_input_tokens", type=int, default=32768)
@@ -111,7 +163,6 @@ def main():
     parser.add_argument("--bnb8", action="store_true", help="Load model in 8-bit via bitsandbytes (vLLM).")
     parser.add_argument("--load_in_4bit", action="store_true", help="Load model in 4-bit via bitsandbytes (vLLM).")
     
-    parser.add_argument("--bf16", action="store_true", help="(ignored) kept for CLI compatibility")
     parser.add_argument("--output_pred", default="predictions_techqa_llama3.jsonl")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--limit", type=int, default=5)
@@ -181,6 +232,8 @@ def main():
         ignore_index=True
     )
     
+    df = df[df['answer'] != ""]
+    
     dev_df = df[df["split"] == "dev"]
 
     dev_train, dev_val = train_test_split(dev_df, test_size=0.3, random_state=42)
@@ -238,8 +291,19 @@ def main():
     elif args.bnb8:
         llm_kwargs["quantization"] = "bitsandbytes"  # vLLM will use 8-bit when not forcing 4-bit
 
-    print("[BOOT] starting vLLM engine on CUDA_VISIBLE_DEVICES=1 …")
-    llm = LLM(**llm_kwargs)
+    if args.vllm == "1":
+        print("[BOOT] starting vLLM engine on CUDA_VISIBLE_DEVICES=1 …")
+        llm = LLM(**llm_kwargs)
+    else: 
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model,
+            dtype=torch.bfloat16,
+            device_map="auto",
+        )
+        tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True)
+
+        print("[BOOT] starting normal LLM engine on CUDA_VISIBLE_DEVICES=1 …")
+        
 
     # all_prompts = [apply_chat_template(tokenizer, ex["question"], ex["context"]) for ex in examples]
     kept_examples, all_prompts = [], []
@@ -270,16 +334,29 @@ def main():
         for i in range(0, n, bs):
             batch = examples[i:i+bs]
             prompts = all_prompts[i:i+bs]
+            if args.vllm == "1":
+                decoded = vllm_generate(
+                    llm, prompts,
+                    max_new_tokens=args.max_new_tokens,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    seed=args.seed,
+                )
+            else: 
+                decoded = hf_generate(
+                    model, tokenizer, prompts,
+                    max_new_tokens=args.max_new_tokens,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    seed=args.seed,
+                    stop=["<|eot_id|>", "<|end_of_turn|>"],   # optional
+                )
 
-            decoded = vllm_generate(
-                llm, prompts,
-                max_new_tokens=args.max_new_tokens,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                seed=args.seed,
-            )
 
             for ex, cont_text in zip(batch, decoded):
+                print("*"*20)
+                print(cont_text)
+                print("*"*20)
                 pred = extract_answer(cont_text)
                 golds = ex["golds"]
                 gold_one = golds[0] if golds else ""
